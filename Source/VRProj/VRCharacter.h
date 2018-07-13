@@ -2,6 +2,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStaticsTypes.h"
+#include "VREnums.h"
 #include "VRCharacter.generated.h"
 
 class UCameraComponent;
@@ -11,12 +12,7 @@ class USplineComponent;
 class USplineMeshComponent;
 class UMotionControllerComponent;
 class UMaterialInterface;
-
-UENUM(BlueprintType)
-enum class ESide : uint8 {
-  Left  UMETA(DisplayName = "Left"),
-  Right UMETA(DisplayName = "Right")
-};
+class AVRHandController;
 
 UCLASS()
 class VRPROJ_API AVRCharacter : public ACharacter {
@@ -53,10 +49,13 @@ class VRPROJ_API AVRCharacter : public ACharacter {
     UMaterialInterface* TeleportArcMaterial;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
-    UMotionControllerComponent* LeftMotionController;
+    AVRHandController* LeftHandController;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
-    UMotionControllerComponent* RightMotionController;
+    AVRHandController* RightHandController;
+
+    UPROPERTY(EditDefaultsOnly)
+    TSubclassOf<AVRHandController> HandControllerClass;
 
   private:
     bool bIsTeleporting = false;
@@ -64,6 +63,7 @@ class VRPROJ_API AVRCharacter : public ACharacter {
     float TeleportTraceRadius = 10.f;
     FVector TeleportTo;
     TMap<ESide, EInputEvent> ThumbstickPressState;
+    AVRHandController* GetControllerBySide(const ESide& Side);
 
     void MoveForward(float Throttle);
     void TurnRight(float Throttle);
@@ -73,11 +73,14 @@ class VRPROJ_API AVRCharacter : public ACharacter {
     void TeleportTrace(const ESide* Side);
     void TeleportOrTrace();
     void TeleportFade(float AlphaStart, float AlphaStop);
-    void UpdateTeleportSpline(TArray<FPredictProjectilePathPointData> PathData, UMotionControllerComponent* MotionController);
+    void UpdateTeleportSpline(TArray<FPredictProjectilePathPointData> PathData, AVRHandController* MotionController);
     void HideTeleportSplines();
     void ResetTeleportMarker();
     void ReleaseTeleportButtons();
 
     template<EInputEvent InputEvent, ESide Side>
     void OnThumbstickPress();
+
+    template<EInputEvent InputEvent, ESide Side>
+    void OnGrip();
 };

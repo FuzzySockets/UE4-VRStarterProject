@@ -14,6 +14,9 @@
 #include "Kismet/GameplayStatics.h"
 #include "Components/SplineComponent.h"
 #include "Components/SplineMeshComponent.h"
+#include "VREnums.h"
+#include "VRHandController.h"
+#include "MotionControllerComponent.h"
 
 AVRCharacter::AVRCharacter() {
   PrimaryActorTick.bCanEverTick = true;
@@ -22,14 +25,6 @@ AVRCharacter::AVRCharacter() {
   SceneComponent->SetupAttachment(GetRootComponent());
   CameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera Component"));
   CameraComponent->SetupAttachment(SceneComponent);
-
-  RightMotionController = CreateDefaultSubobject<UMotionControllerComponent>(TEXT("Right Motion Controller"));
-  RightMotionController->SetupAttachment(SceneComponent);
-  RightMotionController->bDisplayDeviceModel = true;
-
-  LeftMotionController = CreateDefaultSubobject<UMotionControllerComponent>(TEXT("Left Motion Controller"));
-  LeftMotionController->SetupAttachment(SceneComponent);
-  LeftMotionController->bDisplayDeviceModel = true;
 
   TeleportSplinePath = CreateDefaultSubobject<USplineComponent>(TEXT("Teleport Path"));
   TeleportSplinePath->SetupAttachment(SceneComponent);
@@ -44,10 +39,8 @@ AVRCharacter::AVRCharacter() {
 
 void AVRCharacter::BeginPlay() {
   Super::BeginPlay();
-  LeftMotionController->SetTrackingMotionSource(FXRMotionControllerBase::LeftHandSourceId);
-  LeftMotionController->AttachToComponent(SceneComponent, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-  RightMotionController->SetTrackingMotionSource(FXRMotionControllerBase::RightHandSourceId);
-  RightMotionController->AttachToComponent(SceneComponent, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+  LeftHandController = AVRHandController::Create(this, SceneComponent, FXRMotionControllerBase::LeftHandSourceId, HandControllerClass);
+  RightHandController = AVRHandController::Create(this, SceneComponent, FXRMotionControllerBase::RightHandSourceId, HandControllerClass);
 }
 
 void AVRCharacter::Tick(float DeltaTime) {
@@ -111,9 +104,10 @@ void AVRCharacter::Teleport() {
 void AVRCharacter::TeleportTrace(const ESide* Side) {
   FHitResult Hit;
   FNavLocation NavLocation;
-  UMotionControllerComponent* TraceComponent = *Side == ESide::Left ? LeftMotionController : RightMotionController;
-  FVector LookDirection = TraceComponent->GetForwardVector();
-  FVector TraceFrom = TraceComponent->GetComponentLocation();
+  if (!LeftHandController || !RightHandController) return;
+  AVRHandController* TraceComponent = *Side == ESide::Left ? LeftHandController : RightHandController;
+  FVector LookDirection = TraceComponent->GetActorForwardVector();
+  FVector TraceFrom = TraceComponent->GetActorLocation();
   FPredictProjectilePathResult PathResult;
   FPredictProjectilePathParams PathParams(TeleportTraceRadius, TraceFrom, LookDirection * 1000, 2.f, ECollisionChannel::ECC_Visibility, this);
   PathParams.bTraceComplex = true;
@@ -130,10 +124,10 @@ void AVRCharacter::TeleportTrace(const ESide* Side) {
   TeleportTo = NavLocation.Location;
 }
 
-void AVRCharacter::UpdateTeleportSpline(TArray<FPredictProjectilePathPointData> PathData, UMotionControllerComponent* MotionController) {
+void AVRCharacter::UpdateTeleportSpline(TArray<FPredictProjectilePathPointData> PathData, AVRHandController* MotionController) {
   
   HideTeleportSplines();
-  TeleportSplinePath->AttachToComponent(MotionController, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+  TeleportSplinePath->AttachToComponent(MotionController->GetRootComponent(), FAttachmentTransformRules::SnapToTargetNotIncludingScale);
   TeleportSplinePath->ClearSplinePoints(false);
 
   for (int32 i = 0; i < PathData.Num(); ++i) {
@@ -188,11 +182,22 @@ void AVRCharacter::ReleaseTeleportButtons() {
   }
 }
 
+AVRHandController* AVRCharacter::GetControllerBySide(const ESide& Side) {
+  return Side == ESide::Left ? LeftHandController : RightHandController;
+}
+
 template<EInputEvent InputEvent, ESide Side>
 void AVRCharacter::OnThumbstickPress() {
   if (bIsTeleporting) return;
   ThumbstickPressState[Side] = InputEvent;
 }
+
+template<EInputEvent InputEvent, ESide Side>
+void AVRCharacter::OnGrip() {
+  return 
+    InputEvent == IE_Pressed ? GetControllerBySide(Side)->Grip() :
+    InputEvent == IE_Released ? GetControllerBySide(Side)->Release() : void();
+};
 
 void AVRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) {
   Super::SetupPlayerInputComponent(PlayerInputComponent);
@@ -200,6 +205,10 @@ void AVRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
   PlayerInputComponent->BindAction(TEXT("LeftThumbstick"), IE_Released, this, &AVRCharacter::OnThumbstickPress<IE_Released, ESide::Left>);
   PlayerInputComponent->BindAction(TEXT("RightThumbstick"), IE_Pressed, this, &AVRCharacter::OnThumbstickPress<IE_Pressed, ESide::Right>);
   PlayerInputComponent->BindAction(TEXT("RightThumbstick"), IE_Released, this, &AVRCharacter::OnThumbstickPress<IE_Released, ESide::Right>);
+  PlayerInputComponent->BindAction(TEXT("GripLeft"), IE_Pressed, this, &AVRCharacter::OnGrip<IE_Pressed, ESide::Left>);
+  PlayerInputComponent->BindAction(TEXT("GripLeft"), IE_Released, this, &AVRCharacter::OnGrip<IE_Released, ESide::Left>);
+  PlayerInputComponent->BindAction(TEXT("GripRight"), IE_Pressed, this, &AVRCharacter::OnGrip<IE_Pressed, ESide::Right>);
+  PlayerInputComponent->BindAction(TEXT("GripRight"), IE_Released, this, &AVRCharacter::OnGrip<IE_Released, ESide::Right>);
   PlayerInputComponent->BindAxis(TEXT("MoveForward"), this, &AVRCharacter::MoveForward);
   PlayerInputComponent->BindAxis(TEXT("TurnRight"), this, &AVRCharacter::TurnRight);
   PlayerInputComponent->BindAxis(TEXT("StrafeRight"), this, &AVRCharacter::StrafeRight);
